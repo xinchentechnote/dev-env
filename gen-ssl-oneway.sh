@@ -59,6 +59,13 @@ openssl x509 -req \
 
 echo "✅ Server certificate signed"
 
+keytool -import \
+  -alias myca \
+  -file ca.crt \
+  -keystore truststore.jks \
+  -storepass 123456 \
+  -noprompt
+
 # ========================
 echo "🔍 Verifying certificate chain..."
 openssl verify -CAfile ca.crt server.crt
