@@ -1,8 +1,7 @@
 #!/bin/bash
 
 # === 配置区域 ===
-# 请修改这里的版本号为你想降级的目标版本 (例如 "1.85.2")
-TARGET_VERSION="1.111.0"
+TARGET_VERSION="1.116.0"
 # ===============
 
 echo "🚀 开始降级 VSCode 到版本 $TARGET_VERSION..."
