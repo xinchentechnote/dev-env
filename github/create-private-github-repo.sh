@@ -102,13 +102,38 @@ remote_matches_target() {
      "$remote_url" == "ssh://git@github.com/$full_name.git" ]]
 }
 
+list_project_files() {
+  local project_root=$1
+
+  if [[ "$HAVE_RG" == true ]]; then
+    rg --files --hidden --no-ignore --glob '!**/.git/**' "$project_root"
+  else
+    find "$project_root" -name .git -prune -o -type f -print
+  fi
+}
+
+find_files_with_content() {
+  local content_pattern=$1
+  local project_root=$2
+
+  if [[ "$HAVE_RG" == true ]]; then
+    # --binary keeps parity with grep, which reports matches inside binary files.
+    rg -l --binary --hidden --no-ignore --glob '!**/.git/**' -- "$content_pattern" "$project_root"
+  else
+    grep -rlE --exclude-dir=.git -- "$content_pattern" "$project_root"
+  fi
+}
+
 scan_for_secret_candidates() {
   local project_root=$1
   local content_pattern
   local filename_pattern
   local content_matches
+  local file_list
   local filename_matches
-  local scan_status
+  local list_status
+  local content_status
+  local filename_status
   local found=false
 
   # Strong signatures reduce false positives. This remains a heuristic guardrail.
@@ -116,20 +141,23 @@ scan_for_secret_candidates() {
   filename_pattern='(^|/)(\.env($|\.)|id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$|credentials?($|\.)|secrets?($|\.)|.*\.(pem|p12|pfx|key|keystore)$)'
 
   set +e
-  content_matches=$(rg -l --hidden --no-ignore --glob '!**/.git/**' -- "$content_pattern" "$project_root" 2>/dev/null)
-  scan_status=$?
+  content_matches=$(find_files_with_content "$content_pattern" "$project_root" 2>/dev/null)
+  content_status=$?
+  list_status=0
+  file_list=$(list_project_files "$project_root" 2>/dev/null) || list_status=$?
+  filename_matches=$(printf '%s\n' "$file_list" | grep -E "$filename_pattern")
+  filename_status=$?
   set -e
-  if [[ $scan_status -gt 1 ]]; then
+  if [[ $content_status -gt 1 ]]; then
     die "content secret scan failed"
   fi
-
-  set +e
-  filename_matches=$(rg --files --hidden --no-ignore --glob '!**/.git/**' "$project_root" 2>/dev/null | grep -E "$filename_pattern")
-  scan_status=$?
-  set -e
-  if [[ $scan_status -gt 1 ]]; then
+  if [[ $list_status -gt 1 || $filename_status -gt 1 ]]; then
     die "filename secret scan failed"
   fi
+
+  # rg and grep emit matches in traversal order, so sort to keep reports stable across machines.
+  content_matches=$(printf '%s\n' "$content_matches" | sort)
+  filename_matches=$(printf '%s\n' "$filename_matches" | sort)
 
   if [[ -n "$content_matches" ]]; then
     found=true
@@ -256,9 +284,15 @@ done
 
 require_command git
 require_command gh
-require_command rg
 require_command grep
 require_command awk
+require_command find
+require_command sort
+
+HAVE_RG=false
+if command -v rg >/dev/null 2>&1; then
+  HAVE_RG=true
+fi
 
 [[ -d "$PROJECT_DIR" ]] || die "project directory does not exist: $PROJECT_DIR"
 PROJECT_DIR=$(cd "$PROJECT_DIR" && pwd -P)
